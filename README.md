@@ -18,7 +18,7 @@
 
 This workflow automates the harmonization, analysis, mapping, and reporting of carbon stocks from Coastal Blue carbon sediments. The system processes field sediment core data through spatial modeling to produce carbon stock estimates with quantified uncertainty.
 
-## Required Inputs
+## Required Inputs (*Note input photos of inputs)
 A) Basic Reporting
 1. Carbon stock core locational data as a spreadsheet in this format - (link corelocations.csv)
 2. Carbon stock sample lab data as a spreadsheet in this format (link coresamples.csv)
@@ -42,7 +42,7 @@ Option 2 can add personal covariates (ensure local and global covairates align)
 Option 3 uses Google Deepminds embeded learning to build a "similarity" matrix for local cores and global dataset
 
 
-## Expected Outputs
+## Expected Outputs (* Note add photos of file outputs + example outputs)
 
 
 Basic Reporting
