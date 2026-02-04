@@ -31,11 +31,10 @@ For Transfer Learning analysis:
 Step 10 - Add covariate files to "BlueCarbon_Workflow_V1.0/covariates" - these should be clipped to the project boundary
 Step 11 - Make sure the covariates listed in "covariates" are the same as those used in "global_cores_with_gee_covariates.csv" file
 Step 12 - Run P2 and P4 Modules
+
 ## Overview
 
 This workflow automates the harmonization, analysis, mapping, and reporting of carbon stocks from Coastal Blue carbon sediments. The system processes field sediment core data through spatial modeling to produce carbon stock estimates with quantified uncertainty.
-
-Quick Gui
 
 There are 4 types of spatial analysis this workflow can perform, these are....
 
@@ -75,8 +74,7 @@ Option 3 uses Google Deepminds embeded learning to build a "similarity" matrix f
 
 ## Expected Outputs (* Note add photos of file outputs + example outputs)
 
-Basic Reporting
-
+A) Basic Reporting
 **Module P2_02:** Exploratory Data Analysis
 - Generates summary statistics by stratum
 - Creates depth profile visualizations
@@ -97,7 +95,7 @@ Basic Reporting
 - Uncertainty quantification via kriging variance
 - Sample size power analysis
 
-Remote sensing informed reporting
+B) Remote sensing informed reporting
 
 **Module P2_05:** Spatial Predictions - Random Forest
 - Integration with Google Earth Engine covariates
