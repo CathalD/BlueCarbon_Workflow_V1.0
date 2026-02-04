@@ -1,4 +1,4 @@
-# Blue Carbon MMRV Workflow
+# Blue Carbon analysis, mapping and reporting workflow
  
 **Date:** January, 2026 
 **Language:** R  
@@ -17,6 +17,16 @@
 ## Overview
 
 This workflow automates the harmonization, analysis, mapping, and reporting of carbon stocks from Coastal Blue carbon sediments. The system processes field sediment core data through spatial modeling to produce carbon stock estimates with quantified uncertainty.
+
+There are 4 types of spatial analysis this workflow can perform, these are....
+
+A) Basic reporting can ingest user provided individual core data and spatial boundaries, and will automatically calculate sample carbon data, core carbon data, harmonize the core data to defined depth intervals, average carbon stocks accross spatial boudnaries, and run a spatial interpolation analysis (kriging) to produce a carbon map
+
+B) Spatial extrpolation with remote sensing is a more advanced function of this workflow taht requires the same data from A) in addition to remote sensing covariates within the defined spatial boundaries provided. With these remote sensing data, the workflow will run a random-forest machine-learning algorithm to build a spatial model of carbon data. The output is a carbon map within the pre-defined spatial boundary that is expected to reflect smaller-scale variations across the project boudnary
+
+C) Bayesian-based analysis can be run with either A) or B), and requires previously data on the carbon stocks within the full extent of your project boundary. This analysis will assume the prior data is the most likely, until the user provides core data within the site, then the workflow will adjust how likely the prior is given the new data, and produce a new map with this updated wieghtings. The more core data you provide, the less weight is given to the prior data, and the more your data will impact the final carbon map.
+
+D) Transfer Learning Anaysis can be used with A, B or C, and uses previous individual core data from within your project area, or from other areas to build a model to predict how much carbon is in your study area. First, this workflow calculates how similar your project area is to the other core data, then uses this "weighs" how much each core should contribute to building your model. It then applies what it learned from this model and transfers this infromation to your project boundary, thus creating a new carbon map from scratch. This new map can be updated as your core data becomes available, similar to the bayesian based analysis.
 
 ## Required Inputs (*Note input photos of inputs)
 A) Basic Reporting
