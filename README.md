@@ -7,16 +7,35 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Required Inputs](#required-inputs)
-3. [Expected Outputs](#expected-outputs)
-4. [Implementation Guide](#implementation-guide)
-5. [References](#references)
-6. [Appendix A - Scientific Foundation](#Appendix A - scientific-foundation)
+2. [Quick Guide](#quick guide)
+3. [Required Inputs](#required-inputs)
+4. [Expected Outputs](#expected-outputs)
+5. [Implementation Guide](#implementation-guide)
+6. [References](#references)
+7. [Appendix A - Scientific Foundation](#Appendix A - scientific-foundation)
 
-
+## Quick Guide
+Step 1 - Open R/RStudio
+Step 2 (Option 1) - Download "MasterScript" and import into R Studio, run this script to pull documents directly from GitHub via URL
+Step 2 (Option 2) - Download entire GitHub repo - Use "MasterScript_Offline" to run workflow...
+Step 3 - Add your carbon data to file "data_raw" in the same format as "core_locations_TEMPLATE.csv" and core_samples_TEMPLATE.csv"
+Step 4 - Run "Modules P1 and P2" for Basic Analysis
+For Advanced analysis with remote sensing:
+Step 5 - Add covariate files to "BlueCarbon_Workflow_V1.0/covariates" - these should be clipped to the project boundary
+Step 6 - Run Modules P1 and P2
+For Bayesain Analysis:
+Step 7 - Add prior carbon maps to foler "BlueCarbon_Workflow_V1.0/data_prior"
+Step 8 - In "blue_carbon_config.R" document, scroll to section "Bayesian" and for variable "Bayesain -> FALSE" change to "Bayesian -> TRUE"
+Step 9 - Run modules P1, P2 and P3
+For Transfer Learning analysis:
+Step 10 - Add covariate files to "BlueCarbon_Workflow_V1.0/covariates" - these should be clipped to the project boundary
+Step 11 - Make sure the covariates listed in "covariates" are the same as those used in "global_cores_with_gee_covariates.csv" file
+Step 12 - Run P2 and P4 Modules
 ## Overview
 
 This workflow automates the harmonization, analysis, mapping, and reporting of carbon stocks from Coastal Blue carbon sediments. The system processes field sediment core data through spatial modeling to produce carbon stock estimates with quantified uncertainty.
+
+Quick Gui
 
 There are 4 types of spatial analysis this workflow can perform, these are....
 
@@ -31,8 +50,10 @@ D) Transfer Learning Anaysis can be used with A, B or C, and uses previous indiv
 ## Required Inputs (*Note input photos of inputs)
 A) Basic Reporting
 1. Carbon stock core locational data as a spreadsheet in this format - (link corelocations.csv)
-2. Carbon stock sample lab data as a spreadsheet in this format (link coresamples.csv)
-3. Project boundary and (optional) strata in one of these format (GeoJson, CSV, .shp. etc)
+<img width="864" height="219" alt="Screenshot 2026-02-04 at 12 44 08 PM" src="https://github.com/user-attachments/assets/7e469415-67b8-41da-ab91-b4ce0592c757" />
+3. Carbon stock sample lab data as a spreadsheet in this format (link coresamples.csv)
+<img width="751" height="317" alt="Screenshot 2026-02-04 at 12 45 17 PM" src="https://github.com/user-attachments/assets/caa4a89e-86cb-4530-a9f5-988d41c42425" />
+5. Project boundary and (optional) strata in one of these format (GeoJson, CSV, .shp. etc)
 
 B) Spatial extrapolation with Remote Sensing models
 *All of above from "Basic reporting" +
@@ -53,7 +74,6 @@ Option 3 uses Google Deepminds embeded learning to build a "similarity" matrix f
 
 
 ## Expected Outputs (* Note add photos of file outputs + example outputs)
-
 
 Basic Reporting
 
