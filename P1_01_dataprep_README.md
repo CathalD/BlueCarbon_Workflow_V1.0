@@ -2,9 +2,9 @@
 
 ## Overview
 
-This module is the foundation of the blue carbon analysis workflow. It ingests raw field core data, performs quality control, validates measurements against VM0033 standards, and prepares harmonized datasets for spatial analysis.
+This module is the foundation of the blue carbon analysis workflow. It ingests raw field core data, performs quality control, validates measurements against statistcal baselines, and prepares harmonized datasets for spatial analysis.
 
-**Primary Goal:** Transform raw sediment core measurements into a clean, validated dataset ready for depth harmonization and spatial modeling.
+**Primary Goal:** Transform raw sediment core measurements into a clean, validated dataset ready for depth harmonization and spatial modeling. As well, inform the user how there sampling strategy compares to a theoretical optimal.
 
 ---
 
@@ -37,9 +37,9 @@ This module is the foundation of the blue carbon analysis workflow. It ingests r
 
 **3. Configuration (`blue_carbon_config.R`)**
 - Valid stratum names and colors
-- VM0033 compliance parameters
+- *Change from VM0033 to statistcal baselines or "theoretical optimum sampling"
 - Quality control thresholds
-- Bulk density defaults by ecosystem
+- Bulk density defaults by ecosystem (fill in the blanks)
 
 ---
 
@@ -122,16 +122,15 @@ Creates boolean flags for each validation check:
 
 ---
 
-## VM0033 Compliance Assessment
+## VM0033 Compliance Assessment ****** Change to Sampling design comparison ******
 
 ### Sample Size Requirements
 
 **What it does:**
-Evaluates whether each stratum meets Verra VM0033 standards for carbon crediting:
+Evaluates whether the current sampling distribution to a theoretical optimum:
 
 **Minimum Requirements:**
-- ≥3 cores per stratum (absolute minimum)
-- Achieved precision ≤20% at 95% confidence interval
+- Achieved precision ≤20% at 90% confidence interval or ≤30% at 95% confidence interval
 
 **Calculations:**
 
@@ -154,6 +153,9 @@ precision = (z × CV) / √n
 ```
 
 </details>
+
+***** Also show lines of code where this should be *******
+
 
 **Output metrics by stratum:**
 - Current sample size
