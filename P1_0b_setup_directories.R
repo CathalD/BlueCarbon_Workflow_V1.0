@@ -45,7 +45,9 @@ output_dirs <- c(
   "outputs/predictions/uncertainty", # Module 04: uncertainty maps
   "outputs/carbon_stocks",         # Module 06: stock calculations
   "outputs/carbon_stocks/maps",    # Module 06: stock raster maps
-  "outputs/mmrv_reports"           # Module 07: verification package
+  "outputs/mmrv_reports",          # Module 07: verification package
+  "outputs/Basic_analysis",      # Quick-access high-level outputs
+  "outputs/Advanced_spatial_analysis" # Quick-access advanced spatial outputs
 )
 
 # Diagnostic directories (used by Modules 01, 03-05)

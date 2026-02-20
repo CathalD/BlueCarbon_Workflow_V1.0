@@ -1542,4 +1542,34 @@ cat("  2. Check CV results in diagnostics/crossvalidation/\n")
 cat("  3. Review carbon stock prediction maps by stratum and depth\n")
 cat("  4. Run: source('05_raster_predictions_rf_bluecarbon.R')\n\n")
 
+# ============================================================================
+# QUICK-ACCESS COPY: ADVANCED SPATIAL ANALYSIS OUTPUTS
+# ============================================================================
+
+log_message("Copying key Module 04 outputs to outputs/Advanced_spatial_analysis...")
+dir.create("outputs/Advanced_spatial_analysis", recursive = TRUE, showWarnings = FALSE)
+
+advanced_sources <- list(
+  predictions = list.files("outputs/predictions/kriging", pattern = "\\.tif$", full.names = TRUE),
+  uncertainty = list.files("outputs/predictions/uncertainty", pattern = "\\.tif$", full.names = TRUE),
+  aoa = list.files("outputs/predictions/aoa", pattern = "\\.tif$", full.names = TRUE),
+  variograms = list.files("diagnostics/variograms", pattern = "\\.png$", full.names = TRUE),
+  crossvalidation = list.files("diagnostics/crossvalidation", pattern = "\\.csv$", full.names = TRUE)
+)
+
+for (category in names(advanced_sources)) {
+  src_files <- advanced_sources[[category]]
+  if (length(src_files) == 0) {
+    log_message(sprintf("No %s files found for Advanced_spatial_analysis copy step", category), "WARNING")
+    next
+  }
+
+  for (src in src_files) {
+    dst_name <- sprintf("advanced_04_%s_%s", category, basename(src))
+    dst <- file.path("outputs/Advanced_spatial_analysis", dst_name)
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied to Advanced_spatial_analysis: %s", basename(dst)))
+  }
+}
+
 log_message("=== MODULE 04 COMPLETE ===")

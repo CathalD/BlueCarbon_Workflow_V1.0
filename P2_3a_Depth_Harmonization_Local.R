@@ -304,4 +304,27 @@ summary_tab <- harmonized_cores %>%
 print(as.data.frame(summary_tab))
 
 cat("\nOutputs saved to: data_processed/ and outputs/plots/by_stratum/\n")
+
+# ============================================================================
+# QUICK-ACCESS COPY: BASIC ANALYSIS OUTPUTS
+# ============================================================================
+
+log_message("Copying key Module 03a outputs to outputs/Basic_analysis...")
+dir.create("outputs/Basic_analysis", recursive = TRUE, showWarnings = FALSE)
+
+basic_module3_files <- c(
+  "data_processed/cores_harmonized_bluecarbon.csv" = "basic_03a_harmonized_cores.csv",
+  "diagnostics/harmonization_diagnostics.csv" = "basic_03a_harmonization_diagnostics.csv"
+)
+
+for (src in names(basic_module3_files)) {
+  dst <- file.path("outputs/Basic_analysis", basic_module3_files[[src]])
+  if (file.exists(src)) {
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied to Basic_analysis: %s", basename(dst)))
+  } else {
+    log_message(sprintf("Skipped missing file for Basic_analysis: %s", src), "WARNING")
+  }
+}
+
 log_message("=== MODULE 03 COMPLETE ===")
