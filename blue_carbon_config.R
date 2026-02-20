@@ -140,6 +140,11 @@ QC_LAT_MAX <- 90
 # Minimum cores per stratum (VM0033 requirement)
 VM0033_MIN_CORES <- 3
 
+# Academic/biometric baseline targets for statistically robust sampling
+ACADEMIC_CONFIDENCE_LEVEL <- 0.95
+ACADEMIC_MARGIN_OF_ERROR <- 0.10
+ACADEMIC_DEFAULT_CV <- 0.5
+
 # Target precision (VM0033 acceptable range: 10-20% relative error at 95% CI)
 VM0033_TARGET_PRECISION <- 20  # percent
 
@@ -403,4 +408,3 @@ if (interactive()) {
   cat(sprintf("  Session ID: %s
 ", SESSION_ID))
 }
-

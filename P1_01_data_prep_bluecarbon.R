@@ -39,6 +39,7 @@ if (file.exists("blue_carbon_config.R")) {
 
 # Verify required config variables are loaded
 required_vars <- c("VM0033_MIN_CORES", "CONFIDENCE_LEVEL", "VALID_STRATA",
+                   "ACADEMIC_CONFIDENCE_LEVEL", "ACADEMIC_MARGIN_OF_ERROR", "ACADEMIC_DEFAULT_CV",
                    "INPUT_CRS", "PROCESSING_CRS", "BD_DEFAULTS")
 missing_vars <- required_vars[!sapply(required_vars, exists)]
 if (length(missing_vars) > 0) {
@@ -314,6 +315,17 @@ calculate_achieved_precision <- function(n, cv, confidence = CONFIDENCE_LEVEL) {
   return(precision)
 }
 
+#' Calculate Cochran sample size recommendation for continuous data
+#' n = (Z^2 * sigma^2) / e^2
+calculate_cochran_n_continuous <- function(cv_percent,
+                                           confidence = ACADEMIC_CONFIDENCE_LEVEL,
+                                           margin_of_error = ACADEMIC_MARGIN_OF_ERROR,
+                                           default_cv = ACADEMIC_DEFAULT_CV) {
+  z <- qnorm(1 - (1 - confidence) / 2)
+  sigma <- ifelse(is.na(cv_percent) || cv_percent <= 0, default_cv, cv_percent / 100)
+  ceiling((z^2 * sigma^2) / (margin_of_error^2))
+}
+
 #' Calculate depth profile completeness (0-100%)
 calculate_profile_completeness <- function(depth_top, depth_bottom, max_depth = MAX_CORE_DEPTH) {
   # Calculate total depth sampled
@@ -585,16 +597,17 @@ write_csv(stratum_stats, "data_processed/cores_summary_by_stratum.csv")
 log_message("Saved stratum summary")
 
 # ============================================================================
-# VM0033 SAMPLE SIZE VALIDATION & STATISTICAL POWER (CHANGE #2)
+# STATISTICAL POWER & VM0033 ASSESSMENT
 # ============================================================================
 
-log_message("Validating VM0033 sample size requirements...")
+log_message("Running Statistical Power & VM0033 Assessment...")
 
 # Calculate power analysis for each stratum
 vm0033_compliance <- stratum_stats %>%
   mutate(
-    # Check minimum sample size
-    meets_min_n = n_cores >= VM0033_MIN_CORES,
+    # Baseline requirements
+    vm0033_min_requirement = VM0033_MIN_CORES,
+    meets_vm0033_min_n = n_cores >= vm0033_min_requirement,
 
     # Calculate required N for target precision
     required_n_20pct = mapply(calculate_required_n, cv_soc, 20, CONFIDENCE_LEVEL),
@@ -604,32 +617,50 @@ vm0033_compliance <- stratum_stats %>%
     # Calculate achieved precision with current n
     achieved_precision_pct = mapply(calculate_achieved_precision, n_cores, cv_soc, CONFIDENCE_LEVEL),
 
-    # Additional cores needed for different precision targets
+    # Additional cores needed for VM0033 precision targets
     additional_for_20pct = pmax(0, required_n_20pct - n_cores),
     additional_for_15pct = pmax(0, required_n_15pct - n_cores),
     additional_for_10pct = pmax(0, required_n_10pct - n_cores),
+
+    # Statistically robust recommendation (Cochran's formula)
+    cochran_sigma_cv = ifelse(is.na(cv_soc) | cv_soc <= 0, ACADEMIC_DEFAULT_CV, cv_soc / 100),
+    required_n_cochran = mapply(
+      calculate_cochran_n_continuous,
+      cv_soc,
+      ACADEMIC_CONFIDENCE_LEVEL,
+      ACADEMIC_MARGIN_OF_ERROR,
+      ACADEMIC_DEFAULT_CV
+    ),
+    additional_for_cochran = pmax(0, required_n_cochran - n_cores),
 
     # VM0033 compliance flags
     meets_20pct_precision = achieved_precision_pct <= 20,
     meets_15pct_precision = achieved_precision_pct <= 15,
     meets_10pct_precision = achieved_precision_pct <= 10,
 
-    # Overall compliance (min 3 cores AND ≤20% precision)
-    vm0033_compliant = meets_min_n & meets_20pct_precision,
+    # Overall VM0033 baseline assessment (min 3 cores AND ≤20% precision)
+    vm0033_compliant = meets_vm0033_min_n & meets_20pct_precision,
+    meets_cochran_recommendation = n_cores >= required_n_cochran,
 
     # Status assessment
     status = case_when(
-      !meets_min_n ~ "INSUFFICIENT (< 3 cores)",
+      !meets_vm0033_min_n ~ "INSUFFICIENT (< 3 cores)",
       achieved_precision_pct <= 10 ~ "EXCELLENT (≤10%)",
       achieved_precision_pct <= 15 ~ "GOOD (≤15%)",
       achieved_precision_pct <= 20 ~ "ACCEPTABLE (≤20%)",
       achieved_precision_pct <= 30 ~ "MARGINAL (>20%, <30%)",
       TRUE ~ "POOR (≥30%)"
+    ),
+    assessment_summary = case_when(
+      vm0033_compliant & meets_cochran_recommendation ~ "Meets VM0033 baseline and robust statistical recommendation",
+      vm0033_compliant & !meets_cochran_recommendation ~ "Meets VM0033 baseline but under Cochran robust recommendation",
+      !vm0033_compliant & meets_cochran_recommendation ~ "Meets Cochran recommendation but misses VM0033 precision baseline",
+      TRUE ~ "Needs additional sampling under both frameworks"
     )
   )
 
 cat("\n========================================\n")
-cat("VM0033 SAMPLE SIZE COMPLIANCE\n")
+cat("STATISTICAL POWER & VM0033 ASSESSMENT\n")
 cat("========================================\n\n")
 
 # Print compliance by stratum
@@ -637,18 +668,28 @@ for (i in 1:nrow(vm0033_compliance)) {
   cat(sprintf("Stratum: %s\n", vm0033_compliance$stratum[i]))
   cat(sprintf("  Current samples: %d cores\n", vm0033_compliance$n_cores[i]))
   cat(sprintf("  CV: %.1f%%\n", vm0033_compliance$cv_soc[i]))
-  cat(sprintf("  Achieved precision: %.1f%% (at 95%% CI)\n",
-              vm0033_compliance$achieved_precision_pct[i]))
+  cat(sprintf("  Achieved precision: %.1f%% (at %.0f%% CI)\n",
+              vm0033_compliance$achieved_precision_pct[i],
+              CONFIDENCE_LEVEL * 100))
+  cat(sprintf("  VM0033 Minimum Requirement: %d cores\n",
+              vm0033_compliance$vm0033_min_requirement[i]))
+  cat(sprintf("  Statistically Robust Recommendation (Cochran's): %d cores (sigma/CV=%.2f, e=%.2f)\n",
+              vm0033_compliance$required_n_cochran[i],
+              vm0033_compliance$cochran_sigma_cv[i],
+              ACADEMIC_MARGIN_OF_ERROR))
   cat(sprintf("  Status: %s\n", vm0033_compliance$status[i]))
-  cat(sprintf("  VM0033 Compliant: %s\n",
+  cat(sprintf("  VM0033 Baseline: %s\n",
               ifelse(vm0033_compliance$vm0033_compliant[i], "✓ YES", "✗ NO")))
+  cat(sprintf("  Cochran Robust Recommendation Met: %s\n",
+              ifelse(vm0033_compliance$meets_cochran_recommendation[i], "✓ YES", "✗ NO")))
+  cat(sprintf("  Combined Assessment: %s\n", vm0033_compliance$assessment_summary[i]))
 
   # Recommendations
-  if (!vm0033_compliance$vm0033_compliant[i]) {
+  if (!vm0033_compliance$vm0033_compliant[i] || !vm0033_compliance$meets_cochran_recommendation[i]) {
     cat("\n  Recommendations:\n")
-    if (!vm0033_compliance$meets_min_n[i]) {
-      cat(sprintf("    • Add %d cores to meet minimum requirement\n",
-                  VM0033_MIN_CORES - vm0033_compliance$n_cores[i]))
+    if (!vm0033_compliance$meets_vm0033_min_n[i]) {
+      cat(sprintf("    • Add %d cores to satisfy VM0033 minimum requirement\n",
+                  vm0033_compliance$vm0033_min_requirement[i] - vm0033_compliance$n_cores[i]))
     }
     if (vm0033_compliance$additional_for_20pct[i] > 0) {
       cat(sprintf("    • Add %d cores to achieve 20%% precision\n",
@@ -658,6 +699,10 @@ for (i in 1:nrow(vm0033_compliance)) {
       cat(sprintf("    • Add %d cores to achieve 15%% precision\n",
                   vm0033_compliance$additional_for_15pct[i]))
     }
+    if (vm0033_compliance$additional_for_cochran[i] > 0) {
+      cat(sprintf("    • Add %d cores to reach Cochran robust recommendation\n",
+                  vm0033_compliance$additional_for_cochran[i]))
+    }
   }
   cat("\n")
 }
@@ -666,17 +711,24 @@ for (i in 1:nrow(vm0033_compliance)) {
 n_compliant <- sum(vm0033_compliance$vm0033_compliant)
 n_total <- nrow(vm0033_compliance)
 
-cat(sprintf("Overall: %d/%d strata meet VM0033 requirements\n\n",
+cat(sprintf("Overall VM0033 Baseline: %d/%d strata meet requirements\n",
             n_compliant, n_total))
+cat(sprintf("Overall Cochran Robust Recommendation: %d/%d strata meet recommendation\n\n",
+            sum(vm0033_compliance$meets_cochran_recommendation), n_total))
 
 if (n_compliant < n_total) {
-  log_message(sprintf("WARNING: %d strata do not meet VM0033 requirements",
+  log_message(sprintf("WARNING: %d strata do not meet VM0033 baseline requirements",
                       n_total - n_compliant), "WARNING")
+}
+
+if (sum(vm0033_compliance$meets_cochran_recommendation) < n_total) {
+  log_message(sprintf("WARNING: %d strata are below Cochran robust recommendation",
+                      n_total - sum(vm0033_compliance$meets_cochran_recommendation)), "WARNING")
 }
 
 # Save VM0033 compliance report
 write_csv(vm0033_compliance, "diagnostics/data_prep/vm0033_compliance_report.csv")
-log_message("Saved VM0033 compliance report")
+log_message("Saved Statistical Power & VM0033 assessment report")
 
 # ============================================================================
 # BULK DENSITY HANDLING
@@ -1206,7 +1258,7 @@ cat(sprintf("  Measured: %d samples (%.1f%%)\n", n_bd_measured,
 cat(sprintf("  Estimated: %d samples (%.1f%%)\n", n_bd_missing,
             100 * n_bd_missing / nrow(cores_complete)))
 
-cat("\nVM0033 Compliance:\n")
+cat("\nStatistical Power & VM0033 Assessment:\n")
 cat(sprintf("  Compliant strata: %d/%d\n",
             sum(vm0033_compliance$vm0033_compliant),
             nrow(vm0033_compliance)))
@@ -1222,7 +1274,7 @@ cat("    - core_totals.csv\n")
 cat("  Summaries:\n")
 cat("    - cores_summary_by_stratum.csv\n")
 cat("    - carbon_by_stratum_summary.csv\n")
-cat("  VM0033 & Uncertainty:\n")
+cat("  Statistical Power & VM0033 Assessment:\n")
 cat("    - vm0033_compliance_report.csv (NEW)\n")
 cat("  Bulk Density:\n")
 cat("    - bd_transparency_report.csv (NEW)\n")
@@ -1236,9 +1288,34 @@ cat("  QA Report:\n")
 cat("    - qa_report.rds\n")
 
 cat("\nNext steps:\n")
-cat("  1. Review VM0033 compliance report\n")
+cat("  1. Review statistical power and VM0033 assessment report\n")
 cat("  2. Check BD transparency and depth completeness\n")
 cat("  3. If needed, collect additional samples for non-compliant strata\n")
 cat("  4. Run: source('02_exploratory_analysis_bluecarbon.R')\n\n")
+
+# ============================================================================
+# QUICK-ACCESS COPY: BASIC ANALYSIS OUTPUTS
+# ============================================================================
+
+log_message("Copying key Module 01 outputs to outputs/Basic_analysis...")
+dir.create("outputs/Basic_analysis", recursive = TRUE, showWarnings = FALSE)
+
+basic_copy_map <- c(
+  "data_processed/cores_clean_bluecarbon.csv" = "basic_01_cleaned_core_locations_and_samples.csv",
+  "data_processed/core_totals.csv" = "basic_01_aggregated_core_totals.csv",
+  "data_processed/cores_summary_by_stratum.csv" = "basic_01_summary_by_stratum.csv",
+  "data_processed/carbon_by_stratum_summary.csv" = "basic_01_carbon_by_stratum_summary.csv",
+  "diagnostics/data_prep/vm0033_compliance_report.csv" = "basic_01_sampling_power_vm0033_assessment.csv"
+)
+
+for (src in names(basic_copy_map)) {
+  dst <- file.path("outputs/Basic_analysis", basic_copy_map[[src]])
+  if (file.exists(src)) {
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied to Basic_analysis: %s", basename(dst)))
+  } else {
+    log_message(sprintf("Skipped missing file for Basic_analysis: %s", src), "WARNING")
+  }
+}
 
 log_message("=== MODULE 01 COMPLETE ===")
