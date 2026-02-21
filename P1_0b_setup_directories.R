@@ -50,7 +50,14 @@ output_dirs <- c(
   "outputs/Basic_analysis/Carbon_Stock_Calculations", # Non-expert: tables & intermediate stock calculations
   "outputs/Basic_analysis/Spatial_Maps_by_Depth",     # Non-expert: depth-specific prediction maps
   "outputs/Basic_analysis/Exploratory_Data_Plots",    # Non-expert: EDA plots and QA visuals
-  "outputs/Advanced_spatial_analysis" # Quick-access advanced spatial outputs
+  "outputs/Advanced_spatial_analysis", # Quick-access advanced spatial outputs
+  "outputs/Advanced_spatial_analysis/RF_Maps_by_Depth", # Advanced: RF depth-level maps + uncertainty/AOA
+  "outputs/Advanced_spatial_analysis/RF_Diagnostics_and_Importance", # Advanced: RF diagnostics tables
+  "outputs/Bayesian_analysis", # Quick-access Bayesian outputs
+  "outputs/Bayesian_analysis/Posterior_Distributions", # Bayesian: posterior distributions + uncertainty summaries
+  "outputs/Bayesian_analysis/Prior_vs_Posterior_Maps", # Bayesian: prior/likelihood/posterior map layers
+  "outputs/Transfer_learning", # Quick-access transfer learning outputs
+  "outputs/Transfer_learning/Global_vs_Local_Comparisons" # Transfer: comparison rasters + diagnostics
 )
 
 # Diagnostic directories (used by Modules 01, 03-05)

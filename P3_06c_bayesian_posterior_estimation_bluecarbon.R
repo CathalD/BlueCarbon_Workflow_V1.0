@@ -599,4 +599,108 @@ cat("   - Or continue with standard workflow and compare results\n")
 cat("3. For temporal analysis: Run Module 08A-10 with posterior estimates\n")
 cat("\n")
 
+# ============================================================================
+# PRESENTATION COPY: BAYESIAN ANALYSIS OUTPUTS
+# ============================================================================
+
+log_message("Copying key Bayesian outputs to outputs/Bayesian_analysis...")
+
+dir.create("outputs/Bayesian_analysis", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Bayesian_analysis/Posterior_Distributions", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Bayesian_analysis/Prior_vs_Posterior_Maps", recursive = TRUE, showWarnings = FALSE)
+
+get_depth_interval_label <- function(depth_cm) {
+  depth_lookup <- data.frame(
+    depth_midpoint = c(7.5, 22.5, 40, 75),
+    depth_top = c(0, 15, 30, 50),
+    depth_bottom = c(15, 30, 50, 100)
+  )
+
+  idx <- which.min(abs(depth_lookup$depth_midpoint - depth_cm))
+  sprintf("%d_to_%dcm", depth_lookup$depth_top[idx], depth_lookup$depth_bottom[idx])
+}
+
+build_bayesian_map_name <- function(src_file) {
+  src_name <- tools::file_path_sans_ext(basename(src_file))
+  src_ext <- tools::file_ext(src_file)
+
+  if (grepl("^carbon_stock_prior_mean_[0-9]+\\.[0-9]cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^carbon_stock_prior_mean_([0-9]+\\.[0-9])cm$", "\\1", src_name))
+    return(sprintf("Prior_Mean_Carbon_Stock_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+  if (grepl("^carbon_stock_rf_[0-9]+cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^carbon_stock_rf_([0-9]+)cm$", "\\1", src_name))
+    return(sprintf("Likelihood_RF_Carbon_Stock_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+  if (grepl("^carbon_stock_posterior_mean_[0-9]+_[0-9]cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^carbon_stock_posterior_mean_([0-9]+_[0-9])cm$", "\\1", src_name))
+    depth_cm <- as.numeric(gsub("_", ".", depth_cm))
+    return(sprintf("Posterior_Mean_Carbon_Stock_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+  if (grepl("^carbon_stock_posterior_se_[0-9]+_[0-9]cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^carbon_stock_posterior_se_([0-9]+_[0-9])cm$", "\\1", src_name))
+    depth_cm <- as.numeric(gsub("_", ".", depth_cm))
+    return(sprintf("Posterior_Standard_Error_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+  if (grepl("^carbon_stock_posterior_conservative_[0-9]+_[0-9]cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^carbon_stock_posterior_conservative_([0-9]+_[0-9])cm$", "\\1", src_name))
+    depth_cm <- as.numeric(gsub("_", ".", depth_cm))
+    return(sprintf("Posterior_Conservative_Carbon_Stock_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+  if (grepl("^information_gain_[0-9]+_[0-9]cm$", src_name)) {
+    depth_cm <- as.numeric(gsub("^information_gain_([0-9]+_[0-9])cm$", "\\1", src_name))
+    depth_cm <- as.numeric(gsub("_", ".", depth_cm))
+    return(sprintf("Bayesian_Information_Gain_Map_%s.%s", get_depth_interval_label(depth_cm), src_ext))
+  }
+
+  sprintf("Bayesian_Output_%s.%s", src_name, src_ext)
+}
+
+hero_candidates <- c(
+  "outputs/predictions/stocks/stock_total_0-100cm_bayesian.tif",
+  "outputs/predictions/stocks/carbon_stock_total_0-100cm_bayesian.tif",
+  "outputs/predictions/posterior/carbon_stock_posterior_mean_75_0cm.tif"
+)
+hero_src <- hero_candidates[file.exists(hero_candidates)][1]
+if (!is.na(hero_src)) {
+  hero_dst <- "outputs/Bayesian_analysis/Bayesian_Final_Updated_Carbon_Stock_Map_0_to_100cm.tif"
+  file.copy(hero_src, hero_dst, overwrite = TRUE)
+  log_message(sprintf("Copied Bayesian hero output: %s", basename(hero_dst)))
+} else {
+  log_message("No Bayesian hero map found for root Bayesian_analysis copy step", "WARNING")
+}
+
+distribution_sources <- c(
+  "diagnostics/bayesian/uncertainty_reduction.csv",
+  "diagnostics/bayesian/prior_likelihood_posterior_comparison.png"
+)
+for (src in distribution_sources[file.exists(distribution_sources)]) {
+  dst_name <- if (grepl("uncertainty_reduction\\.csv$", src)) {
+    "Bayesian_Uncertainty_Reduction_Summary.csv"
+  } else {
+    "Bayesian_Prior_Likelihood_Posterior_Distribution_Plot.png"
+  }
+  dst <- file.path("outputs/Bayesian_analysis/Posterior_Distributions", dst_name)
+  file.copy(src, dst, overwrite = TRUE)
+  log_message(sprintf("Copied Bayesian distribution output: %s", basename(dst)))
+}
+
+bayes_map_sources <- c(
+  list.files("data_prior", pattern = "^carbon_stock_prior_mean_[0-9]+\\.[0-9]cm\\.tif$", full.names = TRUE),
+  list.files("outputs/predictions/rf", pattern = "^carbon_stock_rf_[0-9]+cm\\.tif$", full.names = TRUE),
+  list.files("outputs/predictions/posterior", pattern = "^carbon_stock_posterior_(mean|se|conservative)_[0-9]+_[0-9]cm\\.tif$", full.names = TRUE),
+  list.files("diagnostics/bayesian", pattern = "^information_gain_[0-9]+_[0-9]cm\\.tif$", full.names = TRUE)
+)
+
+if (length(bayes_map_sources) == 0) {
+  log_message("No Bayesian map layers found for Prior_vs_Posterior_Maps copy step", "WARNING")
+} else {
+  for (src in bayes_map_sources) {
+    dst_name <- build_bayesian_map_name(src)
+    dst <- file.path("outputs/Bayesian_analysis/Prior_vs_Posterior_Maps", dst_name)
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied Bayesian map layer: %s", basename(dst)))
+  }
+}
+
 log_message("=== MODULE 06C COMPLETE ===")

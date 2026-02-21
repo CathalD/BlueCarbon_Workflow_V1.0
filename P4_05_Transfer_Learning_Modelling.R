@@ -713,3 +713,77 @@ cat("  - outputs/models/transfer/*.rds (model objects)\n")
 cat("  - outputs/carbon_stocks/predictions/*.tif (prediction rasters)\n")
 cat("  - diagnostics/transfer/*.csv (validation stats)\n")
 cat("\n")
+# ============================================================================
+# PRESENTATION COPY: TRANSFER LEARNING OUTPUTS
+# ============================================================================
+
+cat("\nCopying key Transfer Learning outputs to outputs/Transfer_learning/...\n")
+
+dir.create("outputs/Transfer_learning", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Transfer_learning/Global_vs_Local_Comparisons", recursive = TRUE, showWarnings = FALSE)
+
+get_depth_interval_label <- function(depth_cm) {
+  depth_lookup <- data.frame(
+    depth_midpoint = c(7.5, 22.5, 40, 75),
+    depth_top = c(0, 15, 30, 50),
+    depth_bottom = c(15, 30, 50, 100)
+  )
+
+  idx <- which.min(abs(depth_lookup$depth_midpoint - depth_cm))
+  sprintf("%d_to_%dcm", depth_lookup$depth_top[idx], depth_lookup$depth_bottom[idx])
+}
+
+transfer_stack_files <- list.files(
+  "outputs/carbon_stocks/predictions",
+  pattern = "^depth_[0-9]+\\.?[0-9]*_predictions\\.tif$",
+  full.names = TRUE
+)
+
+if (length(transfer_stack_files) > 0) {
+  depth_values <- as.numeric(gsub(
+    "^depth_([0-9]+\\.?[0-9]*)_predictions\\.tif$",
+    "\\1",
+    basename(transfer_stack_files)
+  ))
+
+  hero_src <- transfer_stack_files[which.max(depth_values)]
+  hero_dst <- "outputs/Transfer_learning/Transfer_Learning_Final_Calibrated_Map_0_to_100cm.tif"
+  file.copy(hero_src, hero_dst, overwrite = TRUE)
+  cat(sprintf("Copied Transfer hero output: %s\n", basename(hero_dst)))
+
+  for (i in seq_along(transfer_stack_files)) {
+    depth_label <- get_depth_interval_label(depth_values[i])
+    dst_name <- sprintf("Transfer_Learning_Global_vs_Local_Comparison_%s.tif", depth_label)
+    dst <- file.path("outputs/Transfer_learning/Global_vs_Local_Comparisons", dst_name)
+    file.copy(transfer_stack_files[i], dst, overwrite = TRUE)
+    cat(sprintf("Copied Transfer comparison map: %s\n", basename(dst)))
+  }
+} else {
+  cat("WARNING: No transfer prediction rasters found for presentation copy step.\n")
+}
+
+transfer_diag_sources <- c(
+  list.files("diagnostics/transfer", pattern = "^transfer_learning_validation\\.csv$", full.names = TRUE),
+  list.files("diagnostics/transfer", pattern = "^variable_importance_depth_[0-9]+\\.?[0-9]*\\.csv$", full.names = TRUE)
+)
+
+if (length(transfer_diag_sources) == 0) {
+  cat("WARNING: No transfer diagnostics found for presentation copy step.\n")
+} else {
+  for (src in transfer_diag_sources) {
+    src_name <- basename(src)
+    if (grepl("^transfer_learning_validation\\.csv$", src_name)) {
+      dst_name <- "Transfer_Learning_Validation_Summary.csv"
+    } else {
+      depth_cm <- as.numeric(gsub(
+        "^variable_importance_depth_([0-9]+\\.?[0-9]*)\\.csv$",
+        "\\1",
+        src_name
+      ))
+      dst_name <- sprintf("Transfer_Learning_Variable_Importance_%s.csv", get_depth_interval_label(depth_cm))
+    }
+    dst <- file.path("outputs/Transfer_learning/Global_vs_Local_Comparisons", dst_name)
+    file.copy(src, dst, overwrite = TRUE)
+    cat(sprintf("Copied Transfer diagnostic: %s\n", basename(dst)))
+  }
+}
