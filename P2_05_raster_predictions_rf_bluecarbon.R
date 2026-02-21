@@ -660,4 +660,117 @@ if (nrow(cv_summary) > 0) {
   log_message(sprintf("Overall mean RMSE: %.3f kg/m²", mean(cv_summary$rmse)))
 }
 
+# ============================================================================
+# 9. PRESENTATION COPY: ADVANCED SPATIAL ANALYSIS OUTPUTS
+# ============================================================================
+
+log_message("Copying key Module 05 outputs to outputs/Advanced_spatial_analysis...")
+
+dir.create("outputs/Advanced_spatial_analysis", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Advanced_spatial_analysis/RF_Maps_by_Depth", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Advanced_spatial_analysis/RF_Diagnostics_and_Importance", recursive = TRUE, showWarnings = FALSE)
+
+get_depth_interval_label <- function(depth_cm) {
+  depth_lookup <- data.frame(
+    depth_midpoint = c(7.5, 22.5, 40, 75),
+    depth_top = c(0, 15, 30, 50),
+    depth_bottom = c(15, 30, 50, 100)
+  )
+
+  if (exists("VM0033_DEPTH_INTERVALS") &&
+      all(c("depth_midpoint", "depth_top", "depth_bottom") %in% names(VM0033_DEPTH_INTERVALS))) {
+    depth_lookup <- VM0033_DEPTH_INTERVALS[, c("depth_midpoint", "depth_top", "depth_bottom")]
+  }
+
+  idx <- which.min(abs(depth_lookup$depth_midpoint - depth_cm))
+  sprintf("%d_to_%dcm", depth_lookup$depth_top[idx], depth_lookup$depth_bottom[idx])
+}
+
+build_rf_depth_map_name <- function(src_file) {
+  src_name <- tools::file_path_sans_ext(basename(src_file))
+  src_ext <- tools::file_ext(src_file)
+
+  parsed <- regexec("^(carbon_stock_rf|se_rf|aoa|di)_([0-9]+)cm$", src_name)
+  parts <- regmatches(src_name, parsed)[[1]]
+
+  if (length(parts) == 3) {
+    metric <- parts[2]
+    depth_cm <- as.numeric(parts[3])
+    depth_label <- get_depth_interval_label(depth_cm)
+
+    metric_label <- switch(
+      metric,
+      carbon_stock_rf = "RF_Carbon_Stock_Map",
+      se_rf = "RF_Standard_Error_Map",
+      aoa = "RF_Area_of_Applicability_Mask",
+      di = "RF_Dissimilarity_Index_Map",
+      metric
+    )
+
+    return(sprintf("%s_%s.%s", metric_label, depth_label, src_ext))
+  }
+
+  sprintf("RF_Depth_Output_%s.%s", src_name, src_ext)
+}
+
+hero_candidates <- c(
+  "outputs/predictions/stocks/stock_total_0-100cm_rf.tif",
+  "outputs/predictions/stocks/carbon_stock_total_0-100cm_rf.tif",
+  "outputs/predictions/stocks/stock_total_0-100cm.tif"
+)
+
+hero_src <- hero_candidates[file.exists(hero_candidates)][1]
+if (!is.na(hero_src)) {
+  hero_dst <- "outputs/Advanced_spatial_analysis/RF_Total_Accumulated_Carbon_Stock_Map_0_to_100cm.tif"
+  file.copy(hero_src, hero_dst, overwrite = TRUE)
+  log_message(sprintf("Copied hero RF map: %s", basename(hero_dst)))
+} else {
+  log_message("No total 0-100cm RF hero map found for Advanced_spatial_analysis copy step", "WARNING")
+}
+
+rf_map_sources <- c(
+  list.files("outputs/predictions/rf", pattern = "^(carbon_stock_rf|se_rf|aoa|di)_[0-9]+cm\\.tif$", full.names = TRUE)
+)
+
+if (length(rf_map_sources) == 0) {
+  log_message("No RF map outputs found for RF_Maps_by_Depth copy step", "WARNING")
+} else {
+  for (src in rf_map_sources) {
+    dst_name <- build_rf_depth_map_name(src)
+    dst <- file.path("outputs/Advanced_spatial_analysis/RF_Maps_by_Depth", dst_name)
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied RF map to RF_Maps_by_Depth: %s", basename(dst)))
+  }
+}
+
+rf_diag_sources <- c(
+  list.files("diagnostics/varimp", pattern = "\\.csv$", full.names = TRUE),
+  list.files("diagnostics/crossvalidation", pattern = "^rf_cv_results\\.csv$", full.names = TRUE),
+  list.files("diagnostics/crossvalidation", pattern = "^cv_predictions_[0-9]+cm\\.csv$", full.names = TRUE)
+)
+
+if (length(rf_diag_sources) == 0) {
+  log_message("No RF diagnostics found for RF_Diagnostics_and_Importance copy step", "WARNING")
+} else {
+  for (src in unique(rf_diag_sources)) {
+    src_name <- basename(src)
+
+    if (grepl("^variable_importance_all_depths\\.csv$", src_name)) {
+      dst_name <- "RF_Variable_Importance_All_Depths.csv"
+    } else if (grepl("^rf_cv_results\\.csv$", src_name)) {
+      dst_name <- "RF_Cross_Validation_Summary.csv"
+    } else if (grepl("^cv_predictions_[0-9]+cm\\.csv$", src_name)) {
+      depth_cm <- as.numeric(gsub("^cv_predictions_([0-9]+)cm\\.csv$", "\\1", src_name))
+      depth_label <- get_depth_interval_label(depth_cm)
+      dst_name <- sprintf("RF_Cross_Validation_Predictions_%s.csv", depth_label)
+    } else {
+      dst_name <- sprintf("RF_Diagnostic_%s", src_name)
+    }
+
+    dst <- file.path("outputs/Advanced_spatial_analysis/RF_Diagnostics_and_Importance", dst_name)
+    file.copy(src, dst, overwrite = TRUE)
+    log_message(sprintf("Copied RF diagnostic to RF_Diagnostics_and_Importance: %s", basename(dst)))
+  }
+}
+
 log_message("\n=== MODULE 05 COMPLETE ===")
