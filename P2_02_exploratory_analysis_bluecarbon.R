@@ -1348,17 +1348,18 @@ cat("  4. Run: source('03_depth_harmonization_bluecarbon.R')\n\n")
 
 log_message("Copying key Module 02 outputs to outputs/Basic_analysis...")
 dir.create("outputs/Basic_analysis", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Basic_analysis/Exploratory_Data_Plots", recursive = TRUE, showWarnings = FALSE)
 
 basic_module2_files <- c(
-  "outputs/plots/exploratory/01_spatial_distribution.png" = "basic_02_spatial_distribution.png",
-  "outputs/plots/exploratory/02_soc_distribution_by_stratum.png" = "basic_02_soc_distribution_by_stratum.png",
-  "outputs/plots/exploratory/03_depth_profiles_by_stratum.png" = "basic_02_depth_profiles_by_stratum.png",
-  "outputs/plots/exploratory/05_carbon_stock_by_stratum.png" = "basic_02_carbon_stock_by_stratum.png",
-  "outputs/plots/exploratory/08_summary_table.png" = "basic_02_summary_table.png"
+  "outputs/plots/exploratory/01_spatial_distribution.png" = "Exploratory_Map_of_Sampling_Locations_by_Stratum.png",
+  "outputs/plots/exploratory/02_soc_distribution_by_stratum.png" = "Exploratory_SOC_Distribution_by_Stratum.png",
+  "outputs/plots/exploratory/03_depth_profiles_by_stratum.png" = "Exploratory_Depth_Profiles_by_Stratum.png",
+  "outputs/plots/exploratory/05_carbon_stock_by_stratum.png" = "Exploratory_Carbon_Stock_Comparison_by_Stratum.png",
+  "outputs/plots/exploratory/08_summary_table.png" = "Exploratory_Summary_Table_of_Key_Statistics.png"
 )
 
 for (src in names(basic_module2_files)) {
-  dst <- file.path("outputs/Basic_analysis", basic_module2_files[[src]])
+  dst <- file.path("outputs/Basic_analysis/Exploratory_Data_Plots", basic_module2_files[[src]])
   if (file.exists(src)) {
     file.copy(src, dst, overwrite = TRUE)
     log_message(sprintf("Copied to Basic_analysis: %s", basename(dst)))

@@ -1543,32 +1543,70 @@ cat("  3. Review carbon stock prediction maps by stratum and depth\n")
 cat("  4. Run: source('05_raster_predictions_rf_bluecarbon.R')\n\n")
 
 # ============================================================================
-# QUICK-ACCESS COPY: ADVANCED SPATIAL ANALYSIS OUTPUTS
+# QUICK-ACCESS COPY: BASIC ANALYSIS OUTPUTS (SPATIAL MAPS BY DEPTH)
 # ============================================================================
 
-log_message("Copying key Module 04 outputs to outputs/Advanced_spatial_analysis...")
-dir.create("outputs/Advanced_spatial_analysis", recursive = TRUE, showWarnings = FALSE)
+log_message("Copying key Module 04 outputs to outputs/Basic_analysis/Spatial_Maps_by_Depth...")
+dir.create("outputs/Basic_analysis", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Basic_analysis/Spatial_Maps_by_Depth", recursive = TRUE, showWarnings = FALSE)
 
-advanced_sources <- list(
-  predictions = list.files("outputs/predictions/kriging", pattern = "\\.tif$", full.names = TRUE),
-  uncertainty = list.files("outputs/predictions/uncertainty", pattern = "\\.tif$", full.names = TRUE),
-  aoa = list.files("outputs/predictions/aoa", pattern = "\\.tif$", full.names = TRUE),
-  variograms = list.files("diagnostics/variograms", pattern = "\\.png$", full.names = TRUE),
-  crossvalidation = list.files("diagnostics/crossvalidation", pattern = "\\.csv$", full.names = TRUE)
-)
+format_stratum_label <- function(stratum_token) {
+  gsub("_", " ", stratum_token)
+}
 
-for (category in names(advanced_sources)) {
-  src_files <- advanced_sources[[category]]
-  if (length(src_files) == 0) {
-    log_message(sprintf("No %s files found for Advanced_spatial_analysis copy step", category), "WARNING")
-    next
+get_depth_interval_label <- function(depth_cm) {
+  if (exists("VM0033_DEPTH_INTERVALS") && all(c("depth_midpoint", "depth_top", "depth_bottom") %in% names(VM0033_DEPTH_INTERVALS))) {
+    depth_index <- which.min(abs(VM0033_DEPTH_INTERVALS$depth_midpoint - depth_cm))
+    depth_top <- VM0033_DEPTH_INTERVALS$depth_top[depth_index]
+    depth_bottom <- VM0033_DEPTH_INTERVALS$depth_bottom[depth_index]
+    return(sprintf("%d_to_%dcm", depth_top, depth_bottom))
+  }
+  sprintf("%.0fcm", depth_cm)
+}
+
+build_basic_spatial_name <- function(src_file) {
+  src_name <- tools::file_path_sans_ext(basename(src_file))
+  src_ext <- tools::file_ext(src_file)
+
+  parsed <- regexec("^(carbon_stock|se_combined|se_kriging|variance_combined|variance_kriging)_(.+)_([0-9]+)cm$", src_name)
+  parsed_parts <- regmatches(src_name, parsed)[[1]]
+
+  if (length(parsed_parts) == 4) {
+    metric_key <- parsed_parts[2]
+    stratum_key <- parsed_parts[3]
+    depth_cm <- as.numeric(parsed_parts[4])
+    depth_label <- get_depth_interval_label(depth_cm)
+    stratum_label <- gsub(" ", "_", format_stratum_label(stratum_key))
+
+    metric_label <- switch(
+      metric_key,
+      carbon_stock = "Kriging_Carbon_Stock_Map",
+      se_combined = "Combined_Standard_Error_Uncertainty_Map",
+      se_kriging = "Kriging_Standard_Error_Uncertainty_Map",
+      variance_combined = "Combined_Variance_Uncertainty_Map",
+      variance_kriging = "Kriging_Variance_Uncertainty_Map",
+      metric_key
+    )
+
+    return(sprintf("%s_%s_%s.%s", metric_label, stratum_label, depth_label, src_ext))
   }
 
-  for (src in src_files) {
-    dst_name <- sprintf("advanced_04_%s_%s", category, basename(src))
-    dst <- file.path("outputs/Advanced_spatial_analysis", dst_name)
+  sprintf("Spatial_Output_%s.%s", src_name, src_ext)
+}
+
+basic_spatial_sources <- c(
+  list.files("outputs/predictions/kriging", pattern = "\\.tif$", full.names = TRUE),
+  list.files("outputs/predictions/uncertainty", pattern = "\\.tif$", full.names = TRUE)
+)
+
+if (length(basic_spatial_sources) == 0) {
+  log_message("No kriging spatial outputs found for Basic_analysis copy step", "WARNING")
+} else {
+  for (src in basic_spatial_sources) {
+    dst_name <- build_basic_spatial_name(src)
+    dst <- file.path("outputs/Basic_analysis/Spatial_Maps_by_Depth", dst_name)
     file.copy(src, dst, overwrite = TRUE)
-    log_message(sprintf("Copied to Advanced_spatial_analysis: %s", basename(dst)))
+    log_message(sprintf("Copied to Basic_analysis/Spatial_Maps_by_Depth: %s", basename(dst)))
   }
 }
 

@@ -1299,17 +1299,18 @@ cat("  4. Run: source('02_exploratory_analysis_bluecarbon.R')\n\n")
 
 log_message("Copying key Module 01 outputs to outputs/Basic_analysis...")
 dir.create("outputs/Basic_analysis", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/Basic_analysis/Carbon_Stock_Calculations", recursive = TRUE, showWarnings = FALSE)
 
 basic_copy_map <- c(
-  "data_processed/cores_clean_bluecarbon.csv" = "basic_01_cleaned_core_locations_and_samples.csv",
-  "data_processed/core_totals.csv" = "basic_01_aggregated_core_totals.csv",
-  "data_processed/cores_summary_by_stratum.csv" = "basic_01_summary_by_stratum.csv",
-  "data_processed/carbon_by_stratum_summary.csv" = "basic_01_carbon_by_stratum_summary.csv",
-  "diagnostics/data_prep/vm0033_compliance_report.csv" = "basic_01_sampling_power_vm0033_assessment.csv"
+  "data_processed/cores_clean_bluecarbon.csv" = "Cleaned_Core_Locations_and_Samples.csv",
+  "data_processed/core_totals.csv" = "Aggregated_Core_Totals_by_Core.csv",
+  "data_processed/cores_summary_by_stratum.csv" = "Core_Summary_Table_by_Stratum.csv",
+  "data_processed/carbon_by_stratum_summary.csv" = "Carbon_Stock_Summary_by_Stratum.csv",
+  "diagnostics/data_prep/vm0033_compliance_report.csv" = "Sampling_Power_and_VM0033_Compliance_Assessment.csv"
 )
 
 for (src in names(basic_copy_map)) {
-  dst <- file.path("outputs/Basic_analysis", basic_copy_map[[src]])
+  dst <- file.path("outputs/Basic_analysis/Carbon_Stock_Calculations", basic_copy_map[[src]])
   if (file.exists(src)) {
     file.copy(src, dst, overwrite = TRUE)
     log_message(sprintf("Copied to Basic_analysis: %s", basename(dst)))

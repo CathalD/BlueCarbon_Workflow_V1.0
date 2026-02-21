@@ -47,6 +47,9 @@ output_dirs <- c(
   "outputs/carbon_stocks/maps",    # Module 06: stock raster maps
   "outputs/mmrv_reports",          # Module 07: verification package
   "outputs/Basic_analysis",      # Quick-access high-level outputs
+  "outputs/Basic_analysis/Carbon_Stock_Calculations", # Non-expert: tables & intermediate stock calculations
+  "outputs/Basic_analysis/Spatial_Maps_by_Depth",     # Non-expert: depth-specific prediction maps
+  "outputs/Basic_analysis/Exploratory_Data_Plots",    # Non-expert: EDA plots and QA visuals
   "outputs/Advanced_spatial_analysis" # Quick-access advanced spatial outputs
 )
 
