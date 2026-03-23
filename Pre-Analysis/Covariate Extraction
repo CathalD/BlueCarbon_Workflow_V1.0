@@ -1,0 +1,682 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║   COASTAL BLUE CARBON — COVARIATE EXTRACTION  v3.0                      ║
+# ║   Canada · Tidal Marsh + Seagrass · VM0033                              ║
+# ║                                                                          ║
+# ║   Run cells top to bottom in order.                                      ║
+# ║   The only cells you need to edit are:                                   ║
+# ║     CELL 2  — your project settings & date ranges                        ║
+# ║     CELL 3  — your AOI (draw, upload, or paste an asset path)            ║
+# ║     CELL 4  — upload your core profiles CSV                              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 1 ── Install packages & authenticate  (run once per session)
+# ──────────────────────────────────────────────────────────────────────────
+
+import subprocess, sys
+
+print("Installing packages…")
+for pkg in ["earthengine-api", "geemap", "geopandas"]:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
+
+import ee
+import geemap
+import pandas as pd
+import numpy as np
+from google.colab import files
+from tqdm.notebook import tqdm
+from datetime import datetime
+from IPython.display import display, clear_output
+import io, os, zipfile, tempfile, traceback
+
+ee.Authenticate()
+print("\n✅ Cell 1 done — packages installed, GEE authenticated.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 2 ── Configuration  ← EDIT THIS CELL
+# ──────────────────────────────────────────────────────────────────────────
+# Edit the values below. Everything else runs automatically.
+
+# ── GEE project (required) ────────────────────────────────────────────────
+GEE_PROJECT    = "northstarlabs"          # your GEE cloud project ID
+
+# ── Output destinations ───────────────────────────────────────────────────
+EXPORT_FOLDER  = "BlueCarbon_CoastalBC"   # Google Drive folder name
+PROJECT_YEAR   = "2020_2023"              # label used in all output filenames
+EXPORT_CRS     = "EPSG:3347"             # Canada Albers Equal Area
+EXPORT_SCALE   = 25                       # covariate GeoTIFF resolution (m)
+EMBED_SCALE    = 10                       # embedding GeoTIFF resolution (m)
+
+# ── To also save the AOI boundary as a GEE Asset, paste your project ID ──
+# ── Leave as None to skip ────────────────────────────────────────────────
+ASSET_PROJECT  = "northstarlabs"          # or None to skip
+
+# ── AOI buffer ────────────────────────────────────────────────────────────
+COV_BUFFER_M   = 500                      # metres buffer around AOI for exports
+
+# ── Sentinel-2 date range ─────────────────────────────────────────────────
+S2_START       = "2020-01-01"
+S2_END         = "2023-12-31"
+
+# ── Sentinel-1 SAR date range ─────────────────────────────────────────────
+SAR_START      = "2020-01-01"
+SAR_END        = "2023-12-31"
+
+# ── TerraClimate date range (for MAT / MAP) ───────────────────────────────
+TC_START       = "2000-01-01"
+TC_END         = "2022-12-31"
+
+# ── Climate analog filter ─────────────────────────────────────────────────
+# Keeps only global cores whose climate is similar to your AOI.
+# Set USE_CLIMATE_FILTER = False to skip and use all cores.
+USE_CLIMATE_FILTER = True
+MAT_TOLERANCE      = 8.0    # ± °C
+MAP_TOLERANCE      = 0.60   # ± fraction (0.60 = ±60%)
+
+# ── Cluster-then-Match (transfer learning weights) ────────────────────────
+# Produces embedding_max_sim scores used as case.weights in the R model.
+# Adds ~15 min. Set to False to skip.
+USE_CLUSTER_MATCH  = False
+N_CLUSTERS         = 5
+
+# ── Internal S2 extraction settings (no need to change normally) ──────────
+S2_MAX_CLOUD   = 20     # max cloud % per scene
+S2_IMAGE_LIMIT = 20     # max scenes per batch area
+S2_BUFFER_M    = 5000   # metres buffer around each extraction batch
+
+# Initialise Earth Engine
+ee.Initialize(project=GEE_PROJECT)
+
+# Canonical 27-band list — must match R workflow column names exactly
+CANONICAL_BANDS = [
+    "elevation_m", "slope", "elevationRelMHW", "twi",
+    "dist_to_channel_m", "tidal_flat_prob", "coastal_dist_m",
+    "VV_mean", "VH_mean", "VVVH_ratio",
+    "B", "G", "R", "B5", "B6", "B7", "NIR", "SWIR1", "SWIR2",
+    "NDVI_median", "LSWI_median", "mNDWI_median",
+    "NDVI_stdDev", "SAVI_median", "tidal_wetness",
+    "MAT_C", "MAP_mm",
+]
+assert len(CANONICAL_BANDS) == 27
+
+print("✅ Cell 2 done — configuration loaded.")
+print(f"   Project : {GEE_PROJECT}")
+print(f"   Outputs : Drive/{EXPORT_FOLDER}  |  CRS: {EXPORT_CRS}  |  Scale: {EXPORT_SCALE} m")
+print(f"   S2      : {S2_START} → {S2_END}")
+print(f"   Climate filter : {USE_CLIMATE_FILTER}  |  Cluster-Match : {USE_CLUSTER_MATCH}")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 3 ── Define your AOI  ← CHOOSE ONE METHOD, comment out the others
+# ──────────────────────────────────────────────────────────────────────────
+
+# ── METHOD A: Draw on an interactive map ─────────────────────────────────
+# Run this sub-cell, draw a polygon on the map, then run the
+# "Confirm drawn AOI" sub-cell directly below.
+
+Map = geemap.Map(center=[49.5, -124.5], zoom=8)
+Map.add_basemap("SATELLITE")
+print("Draw your AOI polygon on the map using the toolbar (pentagon/shape icon).")
+print("When done, run the next sub-cell to confirm.")
+display(Map)
+
+# ── Confirm drawn AOI (run after drawing) ────────────────────────────────
+# aoi = Map.draw_last_feature.geometry()
+# print("✅ AOI set from drawn polygon.")
+
+# ── METHOD B: Load from a GEE Asset ──────────────────────────────────────
+# Paste your asset path and run this line.
+# aoi = ee.FeatureCollection("projects/northstarlabs/assets/BlueCarbon_AOI_2020_2023").geometry()
+# print("✅ AOI loaded from GEE Asset.")
+
+# ── METHOD C: Upload a GeoJSON or Shapefile (.zip) ────────────────────────
+# uploaded = files.upload()   # choose your file in the dialog
+# fname    = list(uploaded.keys())[0]
+# if fname.endswith(".zip"):
+#     import geopandas as gpd
+#     with tempfile.TemporaryDirectory() as tmp:
+#         with zipfile.ZipFile(fname, "r") as z: z.extractall(tmp)
+#         shp = [f for f in os.listdir(tmp) if f.endswith(".shp")][0]
+#         gdf = gpd.read_file(os.path.join(tmp, shp))
+#     aoi = geemap.geopandas_to_ee(gdf).geometry().union()
+# else:
+#     aoi = geemap.geojson_to_ee(fname).geometry().union()
+# print(f"✅ AOI loaded from {fname}.")
+
+# Set buffered AOI for covariate exports
+aoi_cov = aoi.buffer(COV_BUFFER_M)
+print(f"   AOI buffer: {COV_BUFFER_M} m")
+print("✅ Cell 3 done — AOI defined.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 4 ── Load core profiles CSV  ← UPLOAD YOUR FILE HERE
+# ──────────────────────────────────────────────────────────────────────────
+# Upload the output of 05_filter_profiles.R
+# Required columns: profile_id, latitude, longitude, dataset
+
+print("Select your combined_profiles_filtered.csv when the upload dialog appears…")
+uploaded   = files.upload()
+fname      = list(uploaded.keys())[0]
+df_profiles = pd.read_csv(io.BytesIO(list(uploaded.values())[0]))
+df_profiles["profile_id"] = df_profiles["profile_id"].astype(str)
+
+# Basic validation
+required = {"profile_id", "latitude", "longitude", "dataset"}
+missing  = required - set(df_profiles.columns)
+if missing:
+    raise ValueError(f"Missing required columns: {missing}")
+
+df_pts = df_profiles.dropna(subset=["latitude", "longitude"]).copy()
+print(f"\n✅ Cell 4 done — {len(df_pts):,} profiles loaded.")
+print(f"   Datasets : {df_pts['dataset'].value_counts().to_dict()}")
+print(f"   Lat range: {df_pts['latitude'].min():.2f} → {df_pts['latitude'].max():.2f}")
+print(f"   Lon range: {df_pts['longitude'].min():.2f} → {df_pts['longitude'].max():.2f}")
+display(df_pts[["profile_id","dataset","latitude","longitude"]].head())
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 5 ── Build GEE image stacks  (no editing needed)
+# ──────────────────────────────────────────────────────────────────────────
+
+# ── Topography & Channels (7 bands) ──────────────────────────────────────
+print("Building image stacks…")
+
+dem         = ee.Image("NASA/NASADEM_HGT/001").select("elevation")
+elevation_m = dem.rename("elevation_m")
+slope       = ee.Terrain.slope(dem).rename("slope")
+elev_mhw    = dem.subtract(0.5).rename("elevationRelMHW")
+
+slope_rad = ee.Terrain.slope(dem).multiply(3.14159 / 180)
+tan_slope = slope_rad.tan().max(0.001)
+contrib   = (dem.gte(-9999).unmask(0)
+             .reduceNeighborhood(reducer=ee.Reducer.sum(),
+                                  kernel=ee.Kernel.circle(**{"radius":20,"units":"pixels"}))
+             .max(1))
+twi = contrib.divide(tan_slope).log().rename("twi")
+
+channel_mask  = (ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
+                 .select("occurrence").gt(30).unmask(0)
+                 .focalMax(30, "circle", "meters"))
+dist_ch       = (channel_mask
+                 .fastDistanceTransform(500,"pixels","squared_euclidean")
+                 .sqrt().multiply(30).rename("dist_to_channel_m").float())
+
+try:
+    tidal_flat = (ee.ImageCollection("UQ/murray/Intertidal/v1_1/global_intertidal")
+                  .filterBounds(ee.Geometry.BBox(-180,-90,180,90))
+                  .mosaic().select("classification").eq(1).unmask(0)
+                  .rename("tidal_flat_prob").float())
+    print("  ✓ Murray intertidal loaded")
+except Exception:
+    tidal_flat = ee.Image(0).rename("tidal_flat_prob").float()
+    print("  ⚠ Murray intertidal unavailable — tidal_flat_prob set to 0")
+
+water_mask    = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gt(50).unmask(0)
+coastal_dist  = (water_mask.fastDistanceTransform(500,"pixels","squared_euclidean")
+                 .sqrt().multiply(30).rename("coastal_dist_m").float())
+
+stack_topo = (elevation_m.addBands(slope).addBands(elev_mhw).addBands(twi)
+              .addBands(dist_ch).addBands(tidal_flat).addBands(coastal_dist))
+print("  ✓ Topography & Channels (7 bands)")
+
+# ── Sentinel-1 SAR (3 bands) ──────────────────────────────────────────────
+s1 = (ee.ImageCollection("COPERNICUS/S1_GRD")
+      .filterDate(SAR_START, SAR_END)
+      .filter(ee.Filter.listContains("transmitterReceiverPolarisation","VV"))
+      .filter(ee.Filter.listContains("transmitterReceiverPolarisation","VH"))
+      .filter(ee.Filter.eq("instrumentMode","IW"))
+      .map(lambda img: img.updateMask(img.select("VV").gt(-30))))
+s1_mean    = s1.mean()
+stack_sar  = (s1_mean.select("VV").rename("VV_mean")
+              .addBands(s1_mean.select("VH").rename("VH_mean"))
+              .addBands(s1_mean.select("VV").subtract(s1_mean.select("VH")).rename("VVVH_ratio")))
+print("  ✓ Sentinel-1 SAR (3 bands)")
+
+# ── TerraClimate — MAT & MAP (2 bands) ───────────────────────────────────
+tc      = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(TC_START, TC_END)
+tc_mean = tc.mean()
+mat     = tc_mean.expression("((tmmn+tmmx)/2.0)/10.0",
+                               {"tmmn":tc_mean.select("tmmn"),"tmmx":tc_mean.select("tmmx")}).rename("MAT_C")
+stack_climate = mat.addBands(tc_mean.select("pr").multiply(12).rename("MAP_mm"))
+print("  ✓ TerraClimate MAT/MAP (2 bands)")
+
+# ── Google Satellite Embedding V1 (64 bands) ──────────────────────────────
+stack_embed = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL").median()
+print("  ✓ Google Satellite Embedding V1 (64 bands)")
+
+# ── Sentinel-2 helpers ────────────────────────────────────────────────────
+def _mask_s2(image):
+    qa    = image.select("QA60")
+    cloud = qa.bitwiseAnd(1<<10).eq(0).And(qa.bitwiseAnd(1<<11).eq(0))
+    tide  = image.normalizedDifference(["B3","B8"]).lt(0.1)
+    return image.updateMask(cloud.And(tide)).divide(10000)
+
+def _s2_median(region):
+    return (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterDate(S2_START, S2_END).filterBounds(region)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", S2_MAX_CLOUD))
+            .filter(ee.Filter.calendarRange(5, 9, "month"))
+            .limit(S2_IMAGE_LIMIT, "CLOUDY_PIXEL_PERCENTAGE")
+            .map(_mask_s2).median().clip(region))
+
+def _s2_raw_bands(s2):
+    return (s2.select("B2").rename("B").addBands(s2.select("B3").rename("G"))
+            .addBands(s2.select("B4").rename("R")).addBands(s2.select("B5").rename("B5"))
+            .addBands(s2.select("B6").rename("B6")).addBands(s2.select("B7").rename("B7"))
+            .addBands(s2.select("B8").rename("NIR")).addBands(s2.select("B11").rename("SWIR1"))
+            .addBands(s2.select("B12").rename("SWIR2")))
+
+def _s2_derived_bands(s2):
+    B,G,R         = s2.select("B2"),s2.select("B3"),s2.select("B4")
+    NIR,SW1,SW2   = s2.select("B8"),s2.select("B11"),s2.select("B12")
+    return (s2.normalizedDifference(["B8","B4"]).rename("NDVI_median")
+            .addBands(s2.normalizedDifference(["B8","B11"]).rename("LSWI_median"))
+            .addBands(s2.normalizedDifference(["B3","B11"]).rename("mNDWI_median"))
+            .addBands(s2.expression("((NIR-R)/(NIR+R+0.5))*1.5",{"NIR":NIR,"R":R}).rename("SAVI_median"))
+            .addBands(s2.expression(
+                "0.1511*B+0.1973*G+0.3283*R+0.3407*NIR-0.7117*SW1-0.4559*SW2",
+                {"B":B,"G":G,"R":R,"NIR":NIR,"SW1":SW1,"SW2":SW2}).rename("tidal_wetness")))
+
+print("\n✅ Cell 5 done — all image stacks defined.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 6 ── Visualise AOI covariates on map  (optional — run if you want
+#            to inspect layers before the full extraction)
+# ──────────────────────────────────────────────────────────────────────────
+
+print("Building AOI covariate composite for display…")
+s2_aoi    = _s2_median(aoi_cov)
+cov_check = (stack_topo.addBands(stack_sar)
+             .addBands(_s2_raw_bands(s2_aoi))
+             .addBands(_s2_derived_bands(s2_aoi))
+             .addBands(stack_climate)
+             .toFloat().clip(aoi_cov))
+
+MapViz = geemap.Map()
+MapViz.add_basemap("SATELLITE")
+MapViz.centerObject(aoi, zoom=10)
+MapViz.addLayer(cov_check.select("NDVI_median"),
+                {"min":-0.2,"max":0.8,"palette":["d73027","fee090","91cf60","1a9641"]}, "NDVI median")
+MapViz.addLayer(cov_check.select("tidal_wetness"),
+                {"min":-0.35,"max":0.05,"palette":["ffffcc","41b6c4","0c2c84"]}, "Tidal Wetness", False)
+MapViz.addLayer(cov_check.select("VV_mean"),
+                {"min":-25,"max":-5,"palette":["000000","cccccc","ffffff"]}, "SAR VV", False)
+MapViz.addLayer(cov_check.select("elevation_m"),
+                {"min":-5,"max":10,"palette":["0571b0","92c5de","f7f7f7","d6604d","ca0020"]}, "Elevation", False)
+MapViz.addLayer(cov_check.select("dist_to_channel_m"),
+                {"min":0,"max":2000,"palette":["08306b","6baed6","f7fbff"]}, "Dist to Channel", False)
+MapViz.addLayer(cov_check.select("mNDWI_median"),
+                {"min":-0.5,"max":0.5,"palette":["a50026","ffffbf","4575b4"]}, "mNDWI", False)
+MapViz.addLayer(ee.FeatureCollection([ee.Feature(aoi)]),
+                {"color":"FF0000","fillColor":"00000000"}, "AOI Boundary")
+display(MapViz)
+print("✅ Cell 6 done — toggle layers in the map panel on the right.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 7 ── Extract TerraClimate + optional climate filter
+# ──────────────────────────────────────────────────────────────────────────
+
+def _retry(image, batch, scale, tile_scale=2, attempt=0, max_attempts=4):
+    """reduceRegions with recursive batch-halving retry on timeout."""
+    if not batch: return [], 0
+    fc = ee.FeatureCollection(batch)
+    try:
+        res = image.reduceRegions(collection=fc, reducer=ee.Reducer.first(),
+                                   scale=scale, tileScale=tile_scale)
+        return [f["properties"] for f in res.getInfo()["features"]], 0
+    except Exception as e:
+        err = str(e).lower()
+        if (("timed out" in err or "computation" in err or "memory" in err)
+                and len(batch) > 1 and attempt < max_attempts):
+            mid = len(batch)//2
+            r1,f1 = _retry(image, batch[:mid], scale, tile_scale, attempt+1, max_attempts)
+            r2,f2 = _retry(image, batch[mid:], scale, tile_scale, attempt+1, max_attempts)
+            return r1+r2, f1+f2
+        return [], 1
+
+def extract_static(image, features, label, batch_size=200, scale=30):
+    """Extract a static global image at point locations."""
+    results, n_fail = [], 0
+    batches = [features[i:i+batch_size] for i in range(0,len(features),batch_size)]
+    for b in tqdm(batches, desc=label):
+        rows, fail = _retry(image, b, scale)
+        results.extend(rows); n_fail += fail
+    if n_fail: print(f"  ⚠  {label}: {n_fail} batch(es) permanently failed")
+    return pd.DataFrame(results)
+
+def extract_s2(features, label, band_fn, batch_size=25, scale=30):
+    """Per-batch Sentinel-2 extraction — builds a local filtered median per batch."""
+    results, n_fail = [], 0
+    batches = [features[i:i+batch_size] for i in range(0,len(features),batch_size)]
+    for b in tqdm(batches, desc=label):
+        fc = ee.FeatureCollection(b)
+        region = fc.geometry().bounds().buffer(S2_BUFFER_M)
+        try:
+            img = band_fn(_s2_median(region))
+            rows, fail = _retry(img, b, scale)
+            results.extend(rows); n_fail += fail
+        except Exception as e:
+            n_fail += 1; print(f"  ⚠  {label} batch: {e}")
+    if n_fail: print(f"  ⚠  {label}: {n_fail} batch(es) permanently failed")
+    return pd.DataFrame(results)
+
+def extract_ndvi_stddev(features, batch_size=25, scale=30):
+    """
+    Per-batch NDVI stdDev.
+    Must be built per-batch — a globally pre-reduced stdDev image
+    forces GEE to process the full global S2 archive and times out.
+    """
+    results, n_fail = [], 0
+    batches = [features[i:i+batch_size] for i in range(0,len(features),batch_size)]
+    for b in tqdm(batches, desc="NDVI stdDev"):
+        fc = ee.FeatureCollection(b)
+        region = fc.geometry().bounds().buffer(S2_BUFFER_M)
+        try:
+            col = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                   .filterDate(S2_START,S2_END).filterBounds(region)
+                   .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE",S2_MAX_CLOUD))
+                   .filter(ee.Filter.calendarRange(5,9,"month"))
+                   .limit(S2_IMAGE_LIMIT,"CLOUDY_PIXEL_PERCENTAGE")
+                   .map(_mask_s2)
+                   .map(lambda img: img.normalizedDifference(["B8","B4"]).rename("NDVI")))
+            img = col.reduce(ee.Reducer.stdDev()).rename("NDVI_stdDev").clip(region)
+            rows, fail = _retry(img, b, scale)
+            results.extend(rows); n_fail += fail
+        except Exception as e:
+            n_fail += 1; print(f"  ⚠  NDVI stdDev batch: {e}")
+    if n_fail: print(f"  ⚠  NDVI stdDev: {n_fail} batch(es) permanently failed")
+    return pd.DataFrame(results)
+
+def _make_features(df):
+    return [ee.Feature(ee.Geometry.Point([float(r["longitude"]),float(r["latitude"])]),
+                       {"profile_id":str(r["profile_id"]),"dataset":str(r["dataset"])})
+            for _,r in df.iterrows()]
+
+# Build initial feature list
+features = _make_features(df_pts)
+print(f"Feature list: {len(features):,} points")
+
+# Extract TerraClimate first (fast — cheap 4 km resolution)
+print("\nExtracting TerraClimate (MAT/MAP)…")
+df_climate = extract_static(stack_climate, features, "TerraClimate", batch_size=500, scale=4000)
+df_climate["profile_id"] = df_climate["profile_id"].astype(str)
+
+# Optional climate analog filter
+if USE_CLIMATE_FILTER:
+    print("\nApplying climate analog filter…")
+    aoi_samp  = (stack_climate.sample(region=aoi.centroid(maxError=100),
+                                       scale=4000, numPixels=1, geometries=False)
+                 .first().getInfo()["properties"])
+    aoi_mat, aoi_map = aoi_samp["MAT_C"], aoi_samp["MAP_mm"]
+    print(f"  AOI centroid: MAT = {aoi_mat:.1f}°C  |  MAP = {aoi_map:.0f} mm/yr")
+    print(f"  Filter range: MAT {aoi_mat-MAT_TOLERANCE:.1f}–{aoi_mat+MAT_TOLERANCE:.1f}°C  |  "
+          f"MAP {aoi_map*(1-MAP_TOLERANCE):.0f}–{aoi_map*(1+MAP_TOLERANCE):.0f} mm/yr")
+
+    tmp = pd.merge(df_pts.assign(profile_id=lambda d: d["profile_id"].astype(str)),
+                   df_climate[["profile_id","MAT_C","MAP_mm"]], on="profile_id", how="left")
+    keep    = ((tmp["MAT_C"].between(aoi_mat-MAT_TOLERANCE, aoi_mat+MAT_TOLERANCE) &
+                tmp["MAP_mm"].between(aoi_map*(1-MAP_TOLERANCE), aoi_map*(1+MAP_TOLERANCE))) |
+               tmp["MAT_C"].isna())
+    df_pts  = tmp[keep].copy()
+    removed = len(tmp) - len(df_pts)
+    features = _make_features(df_pts)
+    print(f"  Retained: {len(df_pts):,}  |  Removed: {removed:,}")
+else:
+    print("  Climate filter skipped.")
+
+print(f"\n✅ Cell 7 done — {len(features):,} profiles in working set.")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 8 ── Extract all remote sensing stacks at core locations
+#            This is the slow cell — expect 20–60 min depending on dataset size
+# ──────────────────────────────────────────────────────────────────────────
+
+print("Extracting remote sensing covariates at core locations…")
+print("(batches auto-retry with smaller sizes on timeout)\n")
+
+print("[1/5] Topography & Channels — 7 bands")
+df_topo = extract_static(stack_topo, features, "Topography", batch_size=500, scale=30)
+
+print("\n[2/5] Sentinel-1 SAR — 3 bands")
+df_sar  = extract_static(stack_sar, features, "SAR", batch_size=100, scale=30)
+
+print("\n[3/5] Sentinel-2 raw reflectance — 9 bands (B, G, R, B5, B6, B7, NIR, SWIR1, SWIR2)")
+df_s2r  = extract_s2(features, "S2 Raw", _s2_raw_bands, batch_size=25, scale=30)
+
+print("\n[4/5] Sentinel-2 derived indices — 5 bands (NDVI, LSWI, mNDWI, SAVI, tidal wetness)")
+df_s2d  = extract_s2(features, "S2 Derived", _s2_derived_bands, batch_size=25, scale=30)
+
+print("\n[5/5] NDVI standard deviation — 1 band (phenological variability)")
+df_ndvi = extract_ndvi_stddev(features, batch_size=25, scale=30)
+
+# ── Merge everything into one dataframe ──────────────────────────────────
+print("\nMerging all extractions…")
+
+def _merge(main, sub, key="profile_id"):
+    if sub is None or sub.empty: return main
+    drop = ["system:index","dataset"]
+    keep = [key]+[c for c in sub.columns if c not in [key]+drop]
+    return pd.merge(main, sub[keep], on=key, how="left")
+
+df_pts["profile_id"] = df_pts["profile_id"].astype(str)
+df_out = df_pts.copy()
+for part in [df_topo, df_sar, df_s2r, df_s2d, df_ndvi, df_climate]:
+    df_out = _merge(df_out, part)
+
+# Enforce canonical column order; fill any failed bands with NaN
+for col in CANONICAL_BANDS:
+    if col not in df_out.columns:
+        print(f"  ⚠  Missing band (extraction failed): {col}")
+        df_out[col] = float("nan")
+
+meta   = ["profile_id","dataset","latitude","longitude"]
+extras = [c for c in df_out.columns if c not in meta+CANONICAL_BANDS]
+df_out = df_out[meta+extras+CANONICAL_BANDS]
+
+# Quick coverage check
+covered = df_out[CANONICAL_BANDS].notna().any(axis=1).sum()
+print(f"\n  Profiles with ≥1 covariate: {covered:,} / {len(df_out):,}")
+print(f"  NA rates (key bands):")
+for b in ["elevation_m","VV_mean","B5","NDVI_median","NDVI_stdDev","MAT_C"]:
+    pct = df_out[b].isna().mean()*100
+    print(f"    {b:20s}: {pct:.1f}% NA")
+
+print(f"\n✅ Cell 8 done — {len(df_out):,} rows × {len(df_out.columns)} cols | 27 canonical bands")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 9 ── Cluster-then-Match  (skip if USE_CLUSTER_MATCH = False)
+# ──────────────────────────────────────────────────────────────────────────
+
+df_emb = sim_df = med_df = aoi_clust_img = None
+
+if USE_CLUSTER_MATCH:
+    print("Running Cluster-then-Match…")
+
+    # Sample AOI pixels and run K-means
+    print(f"  Sampling AOI pixels at 30 m for K-means (k={N_CLUSTERS})…")
+    aoi_px    = stack_embed.sample(region=aoi, scale=30, seed=42, geometries=True)
+    n_px      = aoi_px.size().getInfo()
+    print(f"  {n_px:,} AOI pixels sampled")
+    clusterer = ee.Clusterer.wekaKMeans(N_CLUSTERS, seed=42).train(aoi_px)
+    clustered = aoi_px.cluster(clusterer)
+    clust_img = stack_embed.cluster(clusterer).rename("cluster_id")
+    ebands    = stack_embed.bandNames().getInfo()
+
+    # Extract medoid per cluster
+    print("  Extracting cluster medoids…")
+    def _medoid(cid):
+        pts    = clustered.filter(ee.Filter.eq("cluster", cid))
+        mu     = pts.reduceColumns(ee.Reducer.mean().repeat(len(ebands)), ebands).get("mean")
+        mu_img = ee.Image.constant(mu)
+        def _d(f):
+            pt  = ee.Image.constant(ee.List(ebands).map(lambda b: f.get(b)))
+            dst = (pt.subtract(mu_img).pow(2).reduce(ee.Reducer.sum())
+                   .reduceRegion(ee.Reducer.first(), f.geometry(), EMBED_SCALE).get("sum"))
+            return f.set("d", dst)
+        return pts.map(_d).sort("d").first().set("cluster_id", cid)
+
+    mdata = ee.FeatureCollection([_medoid(i) for i in range(N_CLUSTERS)]).getInfo()
+    print(f"  {N_CLUSTERS} medoids downloaded")
+
+    # Extract 64-band embeddings at all core locations
+    print(f"  Extracting embeddings at {len(features):,} core locations…")
+    df_emb = extract_static(stack_embed, features, "Embeddings", batch_size=50, scale=EMBED_SCALE)
+    ecols  = [c for c in df_emb.columns if c not in ["profile_id","dataset","system:index"]]
+
+    # Cosine similarity: cores × medoids
+    core_m = np.nan_to_num(df_emb[ecols].values.astype(float), nan=0.0)
+    med_m  = np.nan_to_num(np.array(
+        [[f["properties"].get(b,0.0) for b in ecols] for f in mdata["features"]]), nan=0.0)
+
+    def _l2(m):
+        n = np.linalg.norm(m, axis=1, keepdims=True); n[n==0]=1.0; return m/n
+
+    sim    = _l2(core_m) @ _l2(med_m).T
+    sim_df = df_emb[["profile_id"]].copy()
+    for j in range(N_CLUSTERS):
+        sim_df[f"emb_sim_cluster_{j}"] = sim[:,j]
+    sim_df["embedding_max_sim"]      = sim.max(axis=1)
+    sim_df["embedding_best_cluster"] = sim.argmax(axis=1)
+
+    med_df = pd.DataFrame([
+        {"cluster_id": f["properties"].get("cluster_id"),
+         **{b: f["properties"].get(b) for b in ecols}}
+        for f in mdata["features"]
+    ]).sort_values("cluster_id").reset_index(drop=True)
+
+    # Build similarity raster for AOI export
+    def _sim_img(feat, bands):
+        v   = [float(feat["properties"].get(b,0.0)) for b in bands]
+        mi  = ee.Image.constant(v).rename(bands)
+        dot = stack_embed.multiply(mi).reduce(ee.Reducer.sum())
+        ne  = stack_embed.pow(2).reduce(ee.Reducer.sum()).sqrt()
+        nm  = ee.Number(sum(x**2 for x in v)).sqrt().max(1e-10)
+        return dot.divide(ne.max(1e-10)).divide(nm)
+
+    sim_layers    = [_sim_img(mdata["features"][i], ecols)
+                     .updateMask(clust_img.eq(i)).rename("sim") for i in range(N_CLUSTERS)]
+    aoi_clust_img = (clust_img.toInt16()
+                     .addBands(ee.ImageCollection(sim_layers).mosaic().toFloat())
+                     .clip(aoi))
+
+    print(f"  Mean max similarity: {sim_df['embedding_max_sim'].mean():.3f}")
+    print(f"  Cluster distribution:\n{sim_df['embedding_best_cluster'].value_counts().sort_index().to_string()}")
+    print("✅ Cell 9 done — Cluster-Match complete.")
+else:
+    print("USE_CLUSTER_MATCH = False — skipping. ✅")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CELL 10 ── Export all outputs
+# ──────────────────────────────────────────────────────────────────────────
+
+print("Exporting outputs…\n")
+
+# Build the full 27-band AOI covariate raster
+s2_aoi   = _s2_median(aoi_cov)
+ndvi_aoi = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterDate(S2_START,S2_END).filterBounds(aoi_cov)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE",S2_MAX_CLOUD))
+            .filter(ee.Filter.calendarRange(5,9,"month"))
+            .limit(S2_IMAGE_LIMIT,"CLOUDY_PIXEL_PERCENTAGE")
+            .map(_mask_s2)
+            .map(lambda img: img.normalizedDifference(["B8","B4"]).rename("NDVI")))
+cov_raster = (stack_topo.addBands(stack_sar)
+              .addBands(_s2_raw_bands(s2_aoi))
+              .addBands(_s2_derived_bands(s2_aoi))
+              .addBands(ndvi_aoi.reduce(ee.Reducer.stdDev()).rename("NDVI_stdDev"))
+              .addBands(stack_climate)
+              .toFloat().clip(aoi_cov))
+
+# OUTPUT 1 — AOI boundary → GEE Asset
+if ASSET_PROJECT:
+    asset_id = f"projects/{ASSET_PROJECT}/assets/BlueCarbon_AOI_{PROJECT_YEAR}"
+    aoi_fc   = ee.FeatureCollection([ee.Feature(aoi, {
+        "project_year": PROJECT_YEAR,
+        "created":      datetime.utcnow().isoformat(),
+        "cov_buffer_m": COV_BUFFER_M,
+    })])
+    ee.batch.Export.table.toAsset(
+        collection=aoi_fc,
+        description=f"BlueCarbon_AOI_{PROJECT_YEAR}",
+        assetId=asset_id
+    ).start()
+    print(f"  ✓ Output 1: AOI → GEE Asset queued\n             {asset_id}")
+else:
+    print("  — Output 1: AOI Asset skipped (ASSET_PROJECT = None)")
+
+# OUTPUT 2 — Covariate GeoTIFF → Drive (27 bands, EXPORT_SCALE m)
+ee.batch.Export.image.toDrive(
+    image=cov_raster,
+    description=f"BlueCarbon_Covariate_Snapshot_{PROJECT_YEAR}",
+    folder=EXPORT_FOLDER,
+    fileNamePrefix=f"BlueCarbon_Covariate_Snapshot_{PROJECT_YEAR}",
+    region=aoi_cov, scale=EXPORT_SCALE, crs=EXPORT_CRS, maxPixels=1e13
+).start()
+print(f"  ✓ Output 2: Covariate GeoTIFF queued → Drive/{EXPORT_FOLDER}  ({EXPORT_SCALE} m, 27 bands)")
+
+# OUTPUT 3 — Embeddings raw GeoTIFF → Drive (64 bands, EMBED_SCALE m)
+ee.batch.Export.image.toDrive(
+    image=stack_embed.clip(aoi_cov),
+    description=f"BlueCarbon_Embeddings_Raw_{PROJECT_YEAR}",
+    folder=EXPORT_FOLDER,
+    fileNamePrefix=f"BlueCarbon_Embeddings_Raw_{PROJECT_YEAR}",
+    region=aoi_cov, scale=EMBED_SCALE, crs=EXPORT_CRS, maxPixels=1e13
+).start()
+print(f"  ✓ Output 3: Embeddings GeoTIFF queued → Drive/{EXPORT_FOLDER}  ({EMBED_SCALE} m, 64 bands)")
+
+# OUTPUT 4 — Similarity raster → Drive (cluster-match only)
+if USE_CLUSTER_MATCH and aoi_clust_img is not None:
+    ee.batch.Export.image.toDrive(
+        image=aoi_clust_img,
+        description=f"BlueCarbon_EmbeddingSimilarity_AOI_{PROJECT_YEAR}",
+        folder=EXPORT_FOLDER,
+        fileNamePrefix=f"BlueCarbon_EmbeddingSimilarity_AOI_{PROJECT_YEAR}",
+        region=aoi_cov, scale=30, crs=EXPORT_CRS, maxPixels=1e13
+    ).start()
+    print(f"  ✓ Output 4: Similarity raster queued → Drive/{EXPORT_FOLDER}")
+else:
+    print("  — Output 4: Similarity raster skipped")
+
+# OUTPUT 5 — Core profiles + covariates CSV → download
+out5_name = f"CoreProfiles_Covariates_{PROJECT_YEAR}.csv"
+df_out.to_csv(out5_name, index=False)
+files.download(out5_name)
+print(f"  ✓ Output 5: {out5_name}  ({len(df_out):,} rows, 27 bands)")
+
+# OUTPUTS 6 & 7 — Embeddings & similarity at cores (cluster-match only)
+if USE_CLUSTER_MATCH and df_emb is not None:
+    meta_df = (df_pts[["profile_id","dataset","latitude","longitude"]]
+               .assign(profile_id=lambda d: d["profile_id"].astype(str)).copy())
+    df_emb["profile_id"] = df_emb["profile_id"].astype(str)
+    sim_df["profile_id"] = sim_df["profile_id"].astype(str)
+
+    out6 = pd.merge(meta_df, df_emb, on="profile_id", how="left")
+    out6_name = f"CoreProfiles_Embeddings_Raw_{PROJECT_YEAR}.csv"
+    out6.to_csv(out6_name, index=False); files.download(out6_name)
+    print(f"  ✓ Output 6: {out6_name}  ({len(out6):,} rows, 64 embedding bands)")
+
+    out7 = pd.merge(meta_df, sim_df, on="profile_id", how="left")
+    out7_name = f"CoreProfiles_EmbeddingSimilarity_{PROJECT_YEAR}.csv"
+    out7.to_csv(out7_name, index=False); files.download(out7_name)
+    print(f"  ✓ Output 7: {out7_name}  ({len(out7):,} rows)")
+else:
+    print("  — Outputs 6 & 7: skipped (USE_CLUSTER_MATCH = False)")
+
+print("\n" + "═"*60)
+print("  ✅ All outputs complete")
+print()
+print("  GEE Drive exports (Outputs 1–4):")
+print("  → Open the GEE Code Editor Tasks panel and click")
+print("    RUN on each queued task to start the export.")
+print()
+print("  CSV downloads (Outputs 5–7):")
+print("  → Files downloaded directly to your computer.")
+print("═"*60)
